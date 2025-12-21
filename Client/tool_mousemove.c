@@ -128,6 +128,10 @@ int tool_mousemove(int argc, char **argv) {
 
 	if (optind < argc) {
 		while (optind < argc) {
+			if (i >= 2) {
+				show_help();
+				return 1;
+			}
 			pos[i] = strtol(argv[optind++], NULL, 10);
 			i++;
 		}
