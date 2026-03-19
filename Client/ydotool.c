@@ -43,7 +43,7 @@
 
 struct tool_def {
 	char name[16];
-	void *ptr;
+	int (*ptr)(int argc, char **argv);
 };
 
 int fd_daemon_socket = -1;
@@ -80,8 +80,22 @@ static const struct tool_def tool_list[] = {
 	{"stdin",     tool_stdin},
 };
 
+static int (*find_tool(const char *name))(int argc, char **argv) {
+	int tool_count = sizeof(tool_list) / sizeof(struct tool_def);
+
+	for (int i=0; i<tool_count; i++) {
+		if (strcmp(tool_list[i].name, name) == 0) {
+			return tool_list[i].ptr;
+		}
+	}
+
+	return NULL;
+}
+
 static void show_help() {
 	puts("Usage: ydotool <cmd> <args>\n"
+	     "       ydotool --chain <cmd> <args> [<cmd> <args> ...]\n"
+	     "\n"
 	     "Available commands:");
 
 	int tool_count = sizeof(tool_list) / sizeof(struct tool_def);
@@ -117,19 +131,19 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	int (*tool_main)(int argc, char **argv) = NULL;
+	int chain_mode = strcmp(argv[1], "--chain") == 0 || strcmp(argv[1], "-c") == 0;
+	int first_tool_arg = chain_mode ? 2 : 1;
 
-	int tool_count = sizeof(tool_list) / sizeof(struct tool_def);
-
-	for (int i=0; i<tool_count; i++) {
-		if (strcmp(tool_list[i].name, argv[1]) == 0) {
-			tool_main = tool_list[i].ptr;
-		}
+	if (argc <= first_tool_arg) {
+		show_help();
+		return 1;
 	}
+
+	int (*tool_main)(int argc, char **argv) = find_tool(argv[first_tool_arg]);
 
 	if (!tool_main) {
 		printf("ydotool: Unknown command: %s\n"
-		       "Run 'ydotool help' if you want a command list\n", argv[1]);
+		       "Run 'ydotool help' if you want a command list\n", argv[first_tool_arg]);
 		return 1;
 	}
 
@@ -173,5 +187,35 @@ int main(int argc, char **argv) {
 		exit(2);
 	}
 
-	return tool_main(argc-1, argv+1);
+	if (!chain_mode) {
+		optind = 1;
+		return tool_main(argc-1, argv+1);
+	}
+
+	int index = first_tool_arg;
+
+	while (index < argc) {
+		tool_main = find_tool(argv[index]);
+
+		if (!tool_main) {
+			printf("ydotool: Unknown command: %s\n"
+			       "Run 'ydotool help' if you want a command list\n", argv[index]);
+			return 1;
+		}
+
+		int next_index = index + 1;
+		while (next_index < argc && !find_tool(argv[next_index])) {
+			next_index++;
+		}
+
+		optind = 1;
+		int ret = tool_main(next_index - index, argv + index);
+		if (ret != 0) {
+			return ret;
+		}
+
+		index = next_index;
+	}
+
+	return 0;
 }
